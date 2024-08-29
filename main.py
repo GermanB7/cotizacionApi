@@ -1,56 +1,50 @@
+import base64
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import EmailStr
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.application import MIMEApplication
-import os
 from dotenv import load_dotenv
+import os
 
-# Cargar variables de entorno desde .env
 load_dotenv()
 
 app = FastAPI()
 
-# Ruta para la URL raíz
-@app.get("/")
-def read_root():
-    return {"message": "Bienvenido a la API de Cotización. Usa /send-email-with-pdf/ para enviar un correo."}
-
-# Función para enviar correo electrónico con un PDF adjunto
-def send_email(to_email: str, subject: str, body: str, pdf_file: UploadFile):
-    from_email = os.getenv("EMAIL_USER")
-    password = os.getenv("EMAIL_PASSWORD")
-    smtp_server = os.getenv("SMTP_SERVER")
-    smtp_port = int(os.getenv("SMTP_PORT", 587))
-
-    msg = MIMEMultipart()
-    msg["Subject"] = subject
-    msg["From"] = from_email
-    msg["To"] = to_email
-
-    # Agregar cuerpo del mensaje
-    msg.attach(MIMEText(body, "plain"))
-
-    # Procesar y adjuntar el archivo PDF
+def send_email_via_api(to_email: str, subject: str, body: str, pdf_file: UploadFile):
     try:
-        pdf_data = pdf_file.file.read()
-        part = MIMEApplication(pdf_data, Name=pdf_file.filename)
-        part['Content-Disposition'] = f'attachment; filename="{pdf_file.filename}"'
-        msg.attach(part)
+        configuration = sib_api_v3_sdk.Configuration()
+        configuration.api_key['api-key'] = os.getenv("SENDINBLUE_API_KEY")
+
+        api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+        from_email = {"email": "cotizacionescad8@gmail.com"}  # Usar el remitente verificado
+        to = [{"email": to_email}]
+        
+        # Procesar y adjuntar el archivo PDF (codificación base64)
+        try:
+            pdf_data = base64.b64encode(pdf_file.file.read()).decode('utf-8')
+            attachment = [{"content": pdf_data, "name": pdf_file.filename}]
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error al procesar el PDF: {str(e)}")
+
+        send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+            to=to,
+            html_content=body,
+            sender=from_email,
+            subject=subject,
+            attachment=attachment
+        )
+
+        # Enviar el correo
+        try:
+            api_response = api_instance.send_transac_email(send_smtp_email)
+            print("Correo enviado exitosamente:", api_response)
+        except ApiException as e:
+            raise HTTPException(status_code=500, detail=f"Error al enviar el correo: {str(e)}")
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al procesar el PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en la configuración de la API: {str(e)}")
 
-    # Enviar el correo
-    try:
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(from_email, password)
-            server.sendmail(from_email, to_email, msg.as_string())
-    except smtplib.SMTPException as e:
-        raise HTTPException(status_code=500, detail=f"Error al enviar el correo: {str(e)}")
 
-# Endpoint para enviar el correo con el PDF adjunto
 @app.post("/send-email-with-pdf/")
 def send_custom_email_with_pdf(
     nombre: str = Form(...),
@@ -65,6 +59,6 @@ def send_custom_email_with_pdf(
             f"Gracias por tu interés en nuestro servicio. Adjunto encontrarás la cotización para el área de {area} "
             f"con un valor de ${cotizacion}.\n\nSaludos cordiales.")
 
-    send_email(correo, subject, body, pdf_file)
+    send_email_via_api(correo, subject, body, pdf_file)
     
     return {"message": "Correo con PDF enviado exitosamente"}
