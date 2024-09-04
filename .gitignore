@@ -51,10 +51,7 @@ coverage.xml
 .hypothesis/
 
 # Archivos y directorios relacionados con Docker
-*.dockerignore
-docker-compose.yml
-docker-compose.override.yml
-Dockerfile
+
 
 # Archivos relacionados con Jupyter Notebook
 .ipynb_checkpoints/
