@@ -5,7 +5,6 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import EmailStr
 from dotenv import load_dotenv
 import os
-from io import BytesIO
 
 load_dotenv()
 
@@ -14,8 +13,18 @@ app = FastAPI()
 def process_pdf_file(pdf_file: UploadFile):
     """Función para procesar un archivo PDF y convertirlo en base64."""
     try:
+        # Depuración: nombre del archivo
+        print(f"Procesando archivo: {pdf_file.filename}")
+        
+        # Mover el puntero al inicio por si fue leído previamente
+        pdf_file.file.seek(0)
+        
         # Leer el contenido del archivo y mantenerlo en memoria
         file_content = pdf_file.file.read()
+        
+        # Depuración: imprimir tamaño del archivo
+        print(f"Tamaño del archivo: {len(file_content)} bytes")
+        
         if not file_content:
             raise ValueError(f"El archivo {pdf_file.filename} está vacío")
         
