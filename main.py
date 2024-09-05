@@ -10,23 +10,29 @@ load_dotenv()
 
 app = FastAPI()
 
-def send_email_via_api(to_email: str, subject: str, body: str, pdf_files: list):
+def process_pdf_file(pdf_file: UploadFile):
+    """Función para procesar un archivo PDF y convertirlo en base64."""
+    try:
+        file_content = pdf_file.file.read()
+        if not file_content:
+            raise ValueError(f"El archivo {pdf_file.filename} está vacío")
+        
+        # Convertir a base64
+        pdf_data = base64.b64encode(file_content).decode('utf-8')
+        return {"content": pdf_data, "name": pdf_file.filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al procesar el archivo {pdf_file.filename}: {str(e)}")
+    finally:
+        pdf_file.file.close()
+
+def send_email_via_api(to_email: str, subject: str, body: str, attachments: list):
     try:
         configuration = sib_api_v3_sdk.Configuration()
         configuration.api_key['api-key'] = os.getenv("SENDINBLUE_API_KEY")
 
         api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
-        from_email = {"email": "cotizacionescad8@gmail.com"}  # Usar el remitente verificado
+        from_email = {"email": "cotizacionescad8@gmail.com"}
         to = [{"email": to_email}]
-        
-        # Procesar y adjuntar los archivos PDF (codificación base64)
-        attachments = []
-        for pdf_file in pdf_files:
-            try:
-                pdf_data = base64.b64encode(pdf_file.file.read()).decode('utf-8')
-                attachments.append({"content": pdf_data, "name": pdf_file.filename})
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error al procesar el PDF {pdf_file.filename}: {str(e)}")
 
         send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
             to=to,
@@ -36,7 +42,6 @@ def send_email_via_api(to_email: str, subject: str, body: str, pdf_files: list):
             attachment=attachments
         )
 
-        # Enviar el correo
         try:
             api_response = api_instance.send_transac_email(send_smtp_email)
             print("Correo enviado exitosamente:", api_response)
@@ -45,7 +50,6 @@ def send_email_via_api(to_email: str, subject: str, body: str, pdf_files: list):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en la configuración de la API: {str(e)}")
-
 
 @app.post("/send-email-with-pdfs/")
 def send_custom_email_with_pdfs(
@@ -63,10 +67,8 @@ def send_custom_email_with_pdfs(
                     f"Gracias por tu interés en nuestro servicio. Adjunto encontrarás la cotización para el área de {area} "
                     f"con un valor de ${cotizacion}.\n\nSaludos cordiales.")
 
-    # Crear una lista solo con el archivo de cotización para el cliente
-    pdf_cotizacion = [cotizacion_pdf]
-    
-    # Enviar correo al cliente con solo la cotización
+    # Procesar y enviar correo al cliente con solo la cotización
+    pdf_cotizacion = [process_pdf_file(cotizacion_pdf)]
     send_email_via_api(correo, subject_cliente, body_cliente, pdf_cotizacion)
     
     # Preparar el segundo correo para "cotizacionescad8@gmail.com"
@@ -78,10 +80,14 @@ def send_custom_email_with_pdfs(
                     f"Cotización: ${cotizacion}\n\n"
                     f"Se adjuntan los archivos de la cotización, planos y planos 3D.")
 
-    # Crear una lista con los tres archivos PDF para el correo interno
-    pdf_internos = [cotizacion_pdf, planos_pdf, planos_3d_pdf]
+    # Procesar todos los archivos para el correo interno
+    pdf_internos = [
+        process_pdf_file(cotizacion_pdf),
+        process_pdf_file(planos_pdf),
+        process_pdf_file(planos_3d_pdf)
+    ]
 
-    # Enviar correo interno con todos los datos y archivos
+    # Enviar correo interno con todos los archivos
     send_email_via_api("cotizacionescad8@gmail.com", subject_interno, body_interno, pdf_internos)
     
     return {"message": "Correos enviados exitosamente"}
