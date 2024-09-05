@@ -10,7 +10,7 @@ load_dotenv()
 
 app = FastAPI()
 
-def send_email_via_api(to_email: str, subject: str, body: str, pdf_file: UploadFile):
+def send_email_via_api(to_email: str, subject: str, body: str, pdf_files: list):
     try:
         configuration = sib_api_v3_sdk.Configuration()
         configuration.api_key['api-key'] = os.getenv("SENDINBLUE_API_KEY")
@@ -19,19 +19,21 @@ def send_email_via_api(to_email: str, subject: str, body: str, pdf_file: UploadF
         from_email = {"email": "cotizacionescad8@gmail.com"}  # Usar el remitente verificado
         to = [{"email": to_email}]
         
-        # Procesar y adjuntar el archivo PDF (codificación base64)
-        try:
-            pdf_data = base64.b64encode(pdf_file.file.read()).decode('utf-8')
-            attachment = [{"content": pdf_data, "name": pdf_file.filename}]
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error al procesar el PDF: {str(e)}")
+        # Procesar y adjuntar los archivos PDF (codificación base64)
+        attachments = []
+        for pdf_file in pdf_files:
+            try:
+                pdf_data = base64.b64encode(pdf_file.file.read()).decode('utf-8')
+                attachments.append({"content": pdf_data, "name": pdf_file.filename})
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Error al procesar el PDF {pdf_file.filename}: {str(e)}")
 
         send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
             to=to,
             html_content=body,
             sender=from_email,
             subject=subject,
-            attachment=attachment
+            attachment=attachments
         )
 
         # Enviar el correo
@@ -45,20 +47,41 @@ def send_email_via_api(to_email: str, subject: str, body: str, pdf_file: UploadF
         raise HTTPException(status_code=500, detail=f"Error en la configuración de la API: {str(e)}")
 
 
-@app.post("/send-email-with-pdf/")
-def send_custom_email_with_pdf(
+@app.post("/send-email-with-pdfs/")
+def send_custom_email_with_pdfs(
     nombre: str = Form(...),
     apellido: str = Form(...),
     correo: EmailStr = Form(...),
     area: str = Form(...),
     cotizacion: float = Form(...),
-    pdf_file: UploadFile = File(...)
+    cotizacion_pdf: UploadFile = File(...),
+    planos_pdf: UploadFile = File(...),
+    planos_3d_pdf: UploadFile = File(...)
 ):
-    subject = f"Cotización para {area}"
-    body = (f"Hola {nombre} {apellido},\n\n"
-            f"Gracias por tu interés en nuestro servicio. Adjunto encontrarás la cotización para el área de {area} "
-            f"con un valor de ${cotizacion}.\n\nSaludos cordiales.")
+    subject_cliente = f"Cotización para {area}"
+    body_cliente = (f"Hola {nombre} {apellido},\n\n"
+                    f"Gracias por tu interés en nuestro servicio. Adjunto encontrarás la cotización para el área de {area} "
+                    f"con un valor de ${cotizacion}.\n\nSaludos cordiales.")
 
-    send_email_via_api(correo, subject, body, pdf_file)
+    # Crear una lista solo con el archivo de cotización para el cliente
+    pdf_cotizacion = [cotizacion_pdf]
     
-    return {"message": "Correo con PDF enviado exitosamente"}
+    # Enviar correo al cliente con solo la cotización
+    send_email_via_api(correo, subject_cliente, body_cliente, pdf_cotizacion)
+    
+    # Preparar el segundo correo para "cotizacionescad8@gmail.com"
+    subject_interno = f"Detalles de cotización para {nombre} {apellido} - {area}"
+    body_interno = (f"Se ha registrado una nueva cotización.\n\n"
+                    f"Nombre: {nombre} {apellido}\n"
+                    f"Correo: {correo}\n"
+                    f"Área: {area}\n"
+                    f"Cotización: ${cotizacion}\n\n"
+                    f"Se adjuntan los archivos de la cotización, planos y planos 3D.")
+
+    # Crear una lista con los tres archivos PDF para el correo interno
+    pdf_internos = [cotizacion_pdf, planos_pdf, planos_3d_pdf]
+
+    # Enviar correo interno con todos los datos y archivos
+    send_email_via_api("cotizacionescad8@gmail.com", subject_interno, body_interno, pdf_internos)
+    
+    return {"message": "Correos enviados exitosamente"}
